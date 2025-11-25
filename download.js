@@ -1,48 +1,51 @@
-name: Download NameJet Deleting List
+const fs = require('fs');
+const axios = require('axios');
+const qs = require('qs');
+const { JSDOM } = require('jsdom');
 
-on:
-  schedule:
-    - cron: '0 0 */5 * *'  # every 5 days at midnight UTC
-  workflow_dispatch:
+async function main() {
+  const USER = process.env.NAMEJET_USERNAME;
+  const PASS = process.env.NAMEJET_PASSWORD;
 
-permissions:
-  contents: write
+  const client = axios.create({
+    baseURL: 'https://www.namejet.com',
+    withCredentials: true,
+  });
 
-jobs:
-  fetch-namejet:
-    runs-on: ubuntu-latest
-    env:
-      NAMEJET_USERNAME: ${{ secrets.NAMEJET_USERNAME }}
-      NAMEJET_PASSWORD: ${{ secrets.NAMEJET_PASSWORD }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+  // 1. GET login page
+  const loginPage = await client.get('/login.sn?sendBack=/index.jsp');
+  const dom = new JSDOM(loginPage.data);
+  const doc = dom.window.document;
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
+  // 2. Extract hidden fields
+  const viewstate = doc.querySelector('input[name="__VIEWSTATE"]').value;
+  const eventvalidation = doc.querySelector('input[name="__EVENTVALIDATION"]').value;
 
-      - name: Install dependencies
-        run: npm install axios jsdom qs
+  // 3. POST login
+  const form = {
+    __VIEWSTATE: viewstate,
+    __EVENTVALIDATION: eventvalidation,
+    'ctl00$MainContent$Login1$UserName': USER,
+    'ctl00$MainContent$Login1$Password': PASS,
+    'ctl00$MainContent$Login1$LoginButton': 'Log In'
+  };
 
-      - name: Run download script
-        run: node download.js
+  await client.post('/login.sn?sendBack=/index.jsp', qs.stringify(form), {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
 
-      - name: Archive the CSV with date
-        run: |
-          mkdir -p archive
-          DATE=$(date +'%Y-%m-%d')
-          cp deletinglist.csv "archive/deletinglist-$DATE.csv"
+  // 4. Download CSV
+  const csvResp = await client.get('/file_dl.sn?file=deletinglist.csv', {
+    responseType: 'arraybuffer'
+  });
 
-      - name: Commit & push
-        run: |
-          git config --global user.name "DEVBLTOOLS"
-          git config --global user.email "bitlabtools@gmail.com"
-          git add deletinglist.csv archive/
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
-            git commit -m "Update NameJet list $DATE"
-            git push
-          fi
+  // 5. Save CSV
+  fs.writeFileSync('deletinglist.csv', csvResp.data);
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
