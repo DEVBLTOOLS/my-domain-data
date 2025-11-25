@@ -1,51 +1,65 @@
-const fs = require('fs');
 const axios = require('axios');
 const qs = require('qs');
+const fs = require('fs');
 const { JSDOM } = require('jsdom');
 
-async function main() {
-  const USER = process.env.NAMEJET_USERNAME;
-  const PASS = process.env.NAMEJET_PASSWORD;
+async function fetchList() {
+  try {
+    const USER = process.env.NAMEJET_USERNAME;
+    const PASS = process.env.NAMEJET_PASSWORD;
 
-  const client = axios.create({
-    baseURL: 'https://www.namejet.com',
-    withCredentials: true,
-  });
+    // Step 1: GET the login page to capture hidden fields & cookies
+    const getResp = await axios.get('https://www.namejet.com/login.sn?sendBack=/', {
+      headers: {
+        'User‑Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/92.0.4515.159 Safari/537.36'
+      },
+      withCredentials: true
+    });
 
-  // 1. GET login page
-  const loginPage = await client.get('/login.sn?sendBack=/index.jsp');
-  const dom = new JSDOM(loginPage.data);
-  const doc = dom.window.document;
+    const dom = new JSDOM(getResp.data);
+    const doc = dom.window.document;
+    const viewstate = doc.querySelector('input[name="__VIEWSTATE"]').value;
+    const eventvalidation = doc.querySelector('input[name="__EVENTVALIDATION"]').value;
 
-  // 2. Extract hidden fields
-  const viewstate = doc.querySelector('input[name="__VIEWSTATE"]').value;
-  const eventvalidation = doc.querySelector('input[name="__EVENTVALIDATION"]').value;
+    // Step 2: POST login
+    const postData = {
+      '__VIEWSTATE': viewstate,
+      '__EVENTVALIDATION': eventvalidation,
+      'ctl00$MainContent$Login1$UserName': USER,
+      'ctl00$MainContent$Login1$Password': PASS,
+      'ctl00$MainContent$Login1$LoginButton': 'Log In'
+    };
 
-  // 3. POST login
-  const form = {
-    __VIEWSTATE: viewstate,
-    __EVENTVALIDATION: eventvalidation,
-    'ctl00$MainContent$Login1$UserName': USER,
-    'ctl00$MainContent$Login1$Password': PASS,
-    'ctl00$MainContent$Login1$LoginButton': 'Log In'
-  };
+    const loginResp = await axios.post('https://www.namejet.com/login.sn?sendBack=/',
+      qs.stringify(postData),
+      {
+        headers: {
+          'Content‑Type': 'application/x-www-form-urlencoded',
+          'User‑Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) // etc'
+        },
+        withCredentials: true
+      });
 
-  await client.post('/login.sn?sendBack=/index.jsp', qs.stringify(form), {
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
+    // Step 3: Download CSV
+    const csvResp = await axios.get('https://www.namejet.com/file_dl.sn?file=deletinglist.csv', {
+      headers: {
+        'User‑Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) // etc'
+      },
+      responseType: 'arraybuffer',
+      withCredentials: true
+    });
+
+    fs.writeFileSync('deletinglist.csv', csvResp.data);
+    console.log('Downloaded deletinglist.csv');
+
+  } catch (error) {
+    if (error.response && error.response.status === 403) {
+      console.error('Forbidden: check credentials and ensure the endpoint is accessible.');
+    } else {
+      console.error('Fetch error:', error);
     }
-  });
-
-  // 4. Download CSV
-  const csvResp = await client.get('/file_dl.sn?file=deletinglist.csv', {
-    responseType: 'arraybuffer'
-  });
-
-  // 5. Save CSV
-  fs.writeFileSync('deletinglist.csv', csvResp.data);
+    process.exit(1);
+  }
 }
 
-main().catch(err => {
-  console.error(err);
-  process.exit(1);
-});
+fetchList();
