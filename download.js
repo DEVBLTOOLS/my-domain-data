@@ -27,7 +27,7 @@ jobs:
         run: npm install axios jsdom qs
 
       - name: Run download script
-        run: node downloadNameJet.js
+        run: node download.js
 
       - name: Archive the CSV with date
         run: |
@@ -37,8 +37,8 @@ jobs:
 
       - name: Commit & push
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
+          git config --global user.name "DEVBLTOOLS"
+          git config --global user.email "bitlabtools@gmail.com"
           git add deletinglist.csv archive/
           if git diff --staged --quiet; then
             echo "No changes"
